@@ -1687,9 +1687,7 @@ async def _handle_bids_set(client, args):
     return _result(data.get("result", data))
 
 
-async def _handle_report(client, args, *, base_url=None, headers=None, raise_on_timeout=False):
-    """Reports use a different endpoint and flow."""
-    url = f"{base_url or _base_url()}/reports"
+def _report_body(args):
     body = {
         "params": {
             "SelectionCriteria": {
@@ -1709,8 +1707,14 @@ async def _handle_report(client, args, *, base_url=None, headers=None, raise_on_
         body["params"]["SelectionCriteria"]["Filter"] = [
             {"Field": "CampaignId", "Operator": "IN", "Values": [str(i) for i in campaign_ids]}
         ]
+    return body
 
-    headers = _headers() if headers is None else dict(headers)
+
+async def _handle_report(client, args):
+    """Reports use a different endpoint and flow."""
+    url = f"{_base_url()}/reports"
+    body = _report_body(args)
+    headers = _headers()
     headers["processingMode"] = "auto"
     headers["returnMoneyInMicros"] = "false"
 
@@ -1731,8 +1735,6 @@ async def _handle_report(client, args, *, base_url=None, headers=None, raise_on_
             continue
         else:
             return [TextContent(type="text", text=f"Report error {resp.status_code}: {resp.text}")]
-    if raise_on_timeout:
-        raise TimeoutError
     return [TextContent(type="text", text="Report timeout after 30 attempts")]
 
 

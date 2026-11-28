@@ -16,13 +16,22 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
+from phase1_reports import (
+    DEADLINE_SECONDS,
+    DIRECT_PAGE,
+    MAX_RETRY_SECONDS,
+    MAX_ROWS,
+    ReportError,
+    read_direct_report,
+    read_metrika_report,
+    report_arguments,
+)
 from server import (
     TOOLS,
     _handle_adgroups_get,
     _handle_ads_get,
     _handle_campaigns_get,
     _handle_keywords_get,
-    _handle_report,
 )
 from tools_direct_extra import request_with_retry
 from tools_metrika import METRIKA_TOOLS, register_metrika_handlers
@@ -44,7 +53,7 @@ _ALLOWED_TOOLS = {*_DIRECT_GET, "yd_report", *_METRIKA_GET}
 _METRIKA_REPORT_PARAMS = {"id", "metrics", "dimensions", "date1", "date2", "filters", "sort", "limit"}
 _REPORT_PARAMS = {
     "SelectionCriteria", "FieldNames", "ReportName", "ReportType",
-    "DateRangeType", "Format", "IncludeVAT", "IncludeDiscount",
+    "DateRangeType", "Format", "IncludeVAT", "IncludeDiscount", "Page",
 }
 _METHOD_OVERRIDE_HEADERS = {"x-http-method", "x-http-method-override", "x-method-override"}
 
@@ -104,6 +113,7 @@ def _is_report_request(params):
     criteria = params.get("SelectionCriteria")
     if (
         not params.keys() <= _REPORT_PARAMS
+        or params.get("Page") != DIRECT_PAGE
         or params.get("Format") != "TSV"
         or params.get("DateRangeType") != "CUSTOM_DATE"
         or not isinstance(criteria, dict)
@@ -142,11 +152,17 @@ def _guard_http(url, headers, *, operation, counter_id=None):
         if operation == "metrika":
             if request.content:
                 raise RequestDenied
-            if report_query and (
-                request.url.params.get_list("id") != [str(counter_id)]
-                or not request.url.params.keys() <= _METRIKA_REPORT_PARAMS
-            ):
-                raise RequestDenied
+            if report_query:
+                params = request.url.params
+                limit = params.get_list("limit")
+                if (
+                    params.get_list("id") != [str(counter_id)]
+                    or not params.keys() <= _METRIKA_REPORT_PARAMS
+                    or len(limit) != 1
+                    or not re.fullmatch(r"[1-9][0-9]{0,3}", limit[0])
+                    or not 2 <= int(limit[0]) <= MAX_ROWS + 1
+                ):
+                    raise RequestDenied
             return
 
         if request.headers.get_list("content-type") != ["application/json"]:
@@ -175,7 +191,7 @@ def _tls_context():
 def _http_client(url, headers, *, operation, transport, counter_id=None):
     guard = _guard_http(url, headers, operation=operation, counter_id=counter_id)
     async def check_response(response):
-        # Stop the shared report handler before it can return an upstream error body.
+        # Reject upstream errors before reading their bodies.
         allowed = (200, 201, 202) if operation == "report" else (200, 204)
         if response.status_code not in allowed:
             raise UpstreamError
@@ -190,9 +206,9 @@ def _http_client(url, headers, *, operation, transport, counter_id=None):
     )
 
 
-async def _direct_json(url, headers, params, client):
+async def _direct_json(url, headers, params, client, *, max_wait=None):
     response = await request_with_retry(
-        client, url, headers=headers, json_body={"method": "get", "params": params}, timeout=120,
+        client, url, headers=headers, json_body={"method": "get", "params": params}, timeout=120, max_wait=max_wait,
     )
     response.raise_for_status()
     data = response.json()
@@ -201,10 +217,10 @@ async def _direct_json(url, headers, params, client):
     return data
 
 
-async def _require_direct_cabinet(settings, headers, transport):
+async def _require_direct_cabinet(settings, headers, transport, *, max_wait=None):
     url = f"{_DIRECT}/v5/clients"
     async with _http_client(url, headers, operation="get", transport=transport) as client:
-        data = await _direct_json(url, headers, {"FieldNames": ["ClientId"]}, client)
+        data = await _direct_json(url, headers, {"FieldNames": ["ClientId"]}, client, max_wait=max_wait)
     clients = data["result"].get("Clients")
     if not isinstance(clients, list) or len(clients) != 1 or not isinstance(clients[0], dict):
         raise RequestDenied
@@ -234,6 +250,19 @@ def create_server(settings, *, transport=None):
     direct_headers = settings.direct_headers()
     metrika_headers = {"Authorization": f"OAuth {settings.metrika_token}"}
 
+    async def direct_report(args):
+        await _require_direct_cabinet(settings, direct_headers, transport, max_wait=MAX_RETRY_SECONDS)
+        url = f"{_DIRECT}/v5/reports"
+        async with _http_client(url, direct_headers, operation="report", transport=transport) as client:
+            return await read_direct_report(client, url, direct_headers, args)
+
+    async def metrika_report(args):
+        url = _METRIKA + _METRIKA_GET["yd_metrika_report"]
+        async with _http_client(
+            url, metrika_headers, operation="metrika", transport=transport, counter_id=settings.counter_id,
+        ) as client:
+            return await read_metrika_report(client, url, metrika_headers, args)
+
     @mcp.list_tools()
     async def list_tools():
         return list(tools.values())
@@ -248,26 +277,24 @@ def create_server(settings, *, transport=None):
             return _error("Недопустимые параметры инструмента.")
 
         try:
+            if name in _METRIKA_GET and (
+                type(arguments["counter_id"]) is not int or arguments["counter_id"] != settings.counter_id
+            ):
+                raise RequestDenied
+
+            if name in ("yd_report", "yd_metrika_report"):
+                direct = name == "yd_report"
+                args = report_arguments(arguments, direct=direct)
+                read_report = direct_report if direct else metrika_report
+                result = await asyncio.wait_for(read_report(args), timeout=DEADLINE_SECONDS)
+                return [TextContent(type="text", text=result)]
+
             if name in _METRIKA_GET:
-                if type(arguments["counter_id"]) is not int or arguments["counter_id"] != settings.counter_id:
-                    raise RequestDenied
                 url = _METRIKA + _METRIKA_GET[name].format(counter_id=settings.counter_id)
-                async with _http_client(
-                    url, metrika_headers, operation="metrika", transport=transport,
-                    counter_id=settings.counter_id if name == "yd_metrika_report" else None,
-                ) as client:
+                async with _http_client(url, metrika_headers, operation="metrika", transport=transport) as client:
                     return await metrika_handlers[name](client, arguments)
 
             await _require_direct_cabinet(settings, direct_headers, transport)
-            if name == "yd_report":
-                base_url = f"{_DIRECT}/v5"
-                async with _http_client(
-                    f"{base_url}/reports", direct_headers, operation="report", transport=transport,
-                ) as client:
-                    return await _handle_report(
-                        client, arguments, base_url=base_url, headers=direct_headers, raise_on_timeout=True,
-                    )
-
             path, handler = _DIRECT_GET[name]
             url = f"{_DIRECT}/{path}"
 
@@ -278,6 +305,10 @@ def create_server(settings, *, transport=None):
 
             async with _http_client(url, direct_headers, operation="get", transport=transport) as client:
                 return await handler(client, arguments, api=direct_get)
+        except asyncio.TimeoutError:
+            return _error(f"Отчёт не готов за {DEADLINE_SECONDS} секунд. Сузьте период или повторите запрос позже.")
+        except ReportError as exc:
+            return _error(str(exc))
         except RequestDenied:
             return _error("Запрос выходит за пределы разрешённого доступа.")
         except Exception:

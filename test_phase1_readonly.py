@@ -1,7 +1,6 @@
 """Проверки профиля первой фазы. HTTP всегда подменяется синтетическими ответами."""
 
 from contextlib import asynccontextmanager
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -15,15 +14,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 import phase1_readonly as profile
+from phase1_demo import DEMO_ENV as ENV, FIXTURE_SECRET, PROBE, main_sync as run_demo
 
 
-ENV = {
-    "YD_OAUTH_TOKEN": "fixture-direct-only",
-    "YD_METRIKA_TOKEN": "fixture-metrika-only",
-    "YD_PHASE1_DIRECT_CLIENT_ID": "101",
-    "YD_PHASE1_METRIKA_COUNTER_ID": "202",
-    "YD_LOGIN": "fixture-advertiser",
-}
 SETTINGS = profile.Settings.from_env(ENV)
 REPORT = {
     "date_from": "2026-11-01",
@@ -42,70 +35,11 @@ TOOLS = {
     "yd_metrika_goals_get",
     "yd_metrika_report",
 }
-PROBE = "/json/v5/clients"
-FIXTURE_SECRET = "fixture-private-error-body"
-
-
-class FixtureAPI(httpx.MockTransport):
-    def __init__(self, record_path):
-        super().__init__(self.respond)
-        self.record_path = Path(record_path)
-        self.report_pending = False
-
-    def respond(self, request):
-        path = request.url.path
-        body = json.loads(request.content) if request.content else None
-        with self.record_path.open("a", encoding="utf-8") as record:
-            record.write(path + "\n")
-        if path.startswith("/json/"):
-            assert request.headers["authorization"] == "Bearer " + ENV["YD_OAUTH_TOKEN"]
-            assert request.headers["client-login"] == ENV["YD_LOGIN"]
-        else:
-            assert request.headers["authorization"] == "OAuth " + ENV["YD_METRIKA_TOKEN"]
-            assert "client-login" not in request.headers
-        if path == PROBE:
-            assert body == {"method": "get", "params": {"FieldNames": ["ClientId"]}}
-            client_id = int(os.environ.get("FIXTURE_DIRECT_ID", "101"))
-            return httpx.Response(200, json={"result": {"Clients": [{"ClientId": client_id}]}})
-        if path.endswith("/reports"):
-            assert body["params"]["Format"] == "TSV"
-            if body["params"]["FieldNames"] == ["FixtureHttpError"]:
-                return httpx.Response(400, text=FIXTURE_SECRET)
-            if body["params"]["FieldNames"] == ["FixtureRedirect"]:
-                return httpx.Response(302, headers={"location": "https://example.test/"}, text=FIXTURE_SECRET)
-            if not self.report_pending:
-                self.report_pending = True
-                return httpx.Response(201, headers={"retryIn": "0"})
-            return httpx.Response(200, text="CampaignId\tClicks\tCost\n1\t12\t240.00\n")
-        for service, collection in [
-            ("campaigns", "Campaigns"), ("adgroups", "AdGroups"), ("ads", "Ads"), ("keywords", "Keywords"),
-        ]:
-            if path.endswith("/" + service):
-                assert body["method"] == "get"
-                if body["params"]["SelectionCriteria"].get("Ids") == [999]:
-                    return httpx.Response(200, json={"error": {"error_detail": FIXTURE_SECRET}})
-                return httpx.Response(200, json={"result": {collection: [{"Id": 1}]}})
-        if path == "/management/v1/counter/202":
-            return httpx.Response(200, json={"counter": {"id": 202, "name": "Синтетический счётчик"}})
-        if path == "/management/v1/counter/202/goals":
-            return httpx.Response(200, json={"goals": [{"id": 303, "name": "Синтетическая цель"}]})
-        if path == "/stat/v1/data":
-            assert request.url.params.get_list("id") == ["202"]
-            if request.url.params["metrics"] == "fixture:error":
-                return httpx.Response(403, text=FIXTURE_SECRET)
-            return httpx.Response(200, json={"data": [{"metrics": [9]}], "sampled": False})
-        raise AssertionError("Unexpected outbound path")
-
-
 def run_fixture_server():
-    run = profile.run
-    transport = FixtureAPI(os.environ["FIXTURE_RECORD"])
-
-    async def run_offline(settings):
-        await run(settings, transport=transport)
-
-    with patch.object(profile, "run", run_offline):
-        profile.main_sync()
+    run_demo(
+        record_path=os.environ.get("FIXTURE_RECORD"),
+        direct_id=int(os.environ.get("FIXTURE_DIRECT_ID", "101")),
+    )
 
 
 class ProfileTest(unittest.IsolatedAsyncioTestCase):
@@ -123,7 +57,6 @@ class ProfileTest(unittest.IsolatedAsyncioTestCase):
     @asynccontextmanager
     async def connect(self, **extra_env):
         env = {
-            **ENV,
             "FIXTURE_RECORD": str(self.record),
             "YD_READONLY": "false",
             "YD_CONFIRM": "true",
@@ -263,7 +196,7 @@ class ProfileTest(unittest.IsolatedAsyncioTestCase):
                 await client.post(report, headers=headers, json={"method": "add", "params": {"Format": "TSV"}})
             with self.assertRaises(profile.RequestDenied):
                 await client.post(report, headers=headers, json={"params": {
-                    "Format": "TSV", "DateRangeType": "CUSTOM_DATE",
+                    "Format": "TSV", "DateRangeType": "CUSTOM_DATE", "Page": {"Limit": 1001},
                     "SelectionCriteria": {"Filter": [
                         {"Field": "ClientLogin", "Operator": "IN", "Values": ["foreign"]},
                     ]},
@@ -272,7 +205,7 @@ class ProfileTest(unittest.IsolatedAsyncioTestCase):
         stats = "https://api-metrika.yandex.net/stat/v1/data"
         headers = {"Authorization": "OAuth " + ENV["YD_METRIKA_TOKEN"]}
         async with profile._http_client(stats, headers, operation="metrika", transport=mock, counter_id=202) as client:
-            for params in [{"id": 404}, {"id": [202, 404]}, {"id": 202, "other_id": 404}]:
+            for params in [{"id": 404, "limit": 2}, {"id": [202, 404], "limit": 2}, {"id": 202, "other_id": 404, "limit": 2}, {"id": 202}, {"id": 202, "limit": 1002}, {"id": 202, "limit": [2, 3]}]:
                 with self.subTest(params=params), self.assertRaises(profile.RequestDenied):
                     await client.get(stats, headers=headers, params=params)
             with self.assertRaises(profile.RequestDenied):

@@ -17,7 +17,7 @@ logger = logging.getLogger("yandex-ads-mcp")
 _RETRY_STATUS = (429, 500, 502, 503, 504)
 
 
-async def request_with_retry(client, url, *, headers, json_body, timeout, max_attempts=4):
+async def request_with_retry(client, url, *, headers, json_body, timeout, max_attempts=4, max_wait=None):
     """POST with capped exponential backoff on transient errors / rate limits.
 
     Honours Retry-After when present. Returns the final response (success or last failure).
@@ -29,6 +29,8 @@ async def request_with_retry(client, url, *, headers, json_body, timeout, max_at
         if resp.status_code in _RETRY_STATUS and attempt < max_attempts:
             ra = resp.headers.get("Retry-After", "")
             wait = float(ra) if ra.isdigit() else delay
+            if max_wait is not None:
+                wait = min(wait, max_wait)
             logger.warning("HTTP %s from %s — retry %d/%d in %.1fs",
                            resp.status_code, url, attempt, max_attempts - 1, wait)
             await asyncio.sleep(wait)

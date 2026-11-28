@@ -305,6 +305,23 @@ METRIKA_TOOLS = [
 
 # ── Handler registration ─────────────────────────────────────────────
 
+def _report_params(args):
+    params = {
+        "id": args["counter_id"],
+        "metrics": ",".join(args["metrics"]),
+    }
+    if args.get("dimensions"):
+        params["dimensions"] = ",".join(args["dimensions"])
+    for k in ("date1", "date2", "filters"):
+        if args.get(k):
+            params[k] = args[k]
+    if args.get("sort"):
+        params["sort"] = ",".join(args["sort"])
+    if args.get("limit"):
+        params["limit"] = args["limit"]
+    return params
+
+
 def register_metrika_handlers(dispatch: dict, token: str):
     """Register all 43 Metrika tool handlers into dispatch dict."""
 
@@ -430,20 +447,7 @@ def register_metrika_handlers(dispatch: dict, token: str):
     # ── REPORTS ──────────────────────────────────────────────────────
 
     async def report(client, args, _token=token):
-        params = {
-            "id": args["counter_id"],
-            "metrics": ",".join(args["metrics"]),
-        }
-        if args.get("dimensions"):
-            params["dimensions"] = ",".join(args["dimensions"])
-        for k in ("date1", "date2", "filters"):
-            if args.get(k):
-                params[k] = args[k]
-        if args.get("sort"):
-            params["sort"] = ",".join(args["sort"])
-        if args.get("limit"):
-            params["limit"] = args["limit"]
-        return await _crud_list(client, _token, "/stat/v1/data", params)
+        return await _crud_list(client, _token, "/stat/v1/data", _report_params(args))
 
     async def report_by_time(client, args, _token=token):
         params = {

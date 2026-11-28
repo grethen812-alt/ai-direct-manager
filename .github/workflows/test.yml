@@ -31,9 +31,15 @@ jobs:
       - name: Run offline safety tests
         run: |
           python test_safety.py
-          python -m unittest -v test_phase1_readonly
+          python -m unittest -v test_phase1_readonly test_phase1_reports
 
       - name: Check installed entry points
         run: |
           cd "$RUNNER_TEMP"
-          python -c 'from importlib.metadata import distribution; scripts = {ep.name: ep for ep in distribution("yandex-ads-mcp").entry_points}; assert callable(scripts["yandex-ads-mcp"].load()); assert callable(scripts["yandex-ads-mcp-phase1"].load())'
+          python - <<'PY'
+          from importlib.metadata import distribution
+
+          entries = {entry.name: entry for entry in distribution("yandex-ads-mcp").entry_points}
+          for name in ("yandex-ads-mcp", "yandex-ads-mcp-phase1", "yandex-ads-mcp-phase1-demo"):
+              assert callable(entries[name].load())
+          PY

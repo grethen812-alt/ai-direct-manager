@@ -15,9 +15,10 @@ dependencies = [
 [project.scripts]
 yandex-ads-mcp = "server:main_sync"
 yandex-ads-mcp-phase1 = "phase1_readonly:main_sync"
+yandex-ads-mcp-phase1-demo = "phase1_demo:main_sync"
 
 [tool.setuptools]
-py-modules = ["server", "phase1_readonly", "tools_direct_extra", "tools_metrika", "tools_audience"]
+py-modules = ["server", "phase1_readonly", "phase1_reports", "phase1_demo", "tools_direct_extra", "tools_metrika", "tools_audience"]
 
 [build-system]
 requires = ["setuptools==84.2.1"]
