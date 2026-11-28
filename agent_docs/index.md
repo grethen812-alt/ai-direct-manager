@@ -9,7 +9,9 @@
 
 ## Основные
 
-- `agent_docs/architecture.md` — архитектура и компоненты; актуально при изменениях системы.
+- [Текущая архитектура](architecture.md) — реализованный технический базис.
+- [Целевая архитектура AI Performance Manager](architecture/ai-performance-manager.md) — предложение по модулям, данным и правам.
+- [Дорожная карта AI Performance Manager](guides/ai-performance-manager-roadmap.md) — план фаз, риски и открытые вопросы.
 - `agent_docs/invariants.md` — жёсткие правила продукта (нарушение = баг); сверяться при изменениях данных, безопасности, API.
 - `agent_docs/adr/` — атомарный журнал значимых решений (по файлу на решение). Правила: `agent_docs/adr/README.md`.
 - `agent_docs/development-history/` — атомарный журнал итераций (по файлу на итерацию). Правила: `agent_docs/development-history/README.md`.

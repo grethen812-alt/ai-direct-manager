@@ -1,5 +1,8 @@
 # Архитектура
 
+Этот файл описывает реализованный базис. Предложение по развитию вынесено
+в [целевую архитектуру AI Performance Manager](architecture/ai-performance-manager.md).
+
 ## Обзор
 
 Один Python-процесс, говорящий с AI-ассистентом по stdio-протоколу MCP и с четырьмя API
@@ -31,6 +34,15 @@
 
 ## Потоки данных
 
+В подтверждённом браузерном сценарии Codex вызывает частный плагин через
+Secure MCP Tunnel. Туннель запускает синтетический профиль через `stdio`,
+а в тесте обращения к Яндексу заменены подставными HTTP-ответами.
+Профиль ограничивает обращения одним кабинетом и счётчиком, а отчёты — общим
+дедлайном и пределами периода, строк и байтов.
+[Границы и запуск профиля](guides/phase1-readonly.md).
+
+Основной сервер использует следующий поток.
+
 1. Ассистент вызывает инструмент → `server.py` проверяет режимы (`YD_READONLY` блокирует
    мутацию до сети; `YD_CONFIRM` без `confirm=true` возвращает превью).
 2. Выбирается кабинет: логин из `YD_DIRECT_TOKENS` → его токен без `Client-Login`; иначе
@@ -42,7 +54,7 @@
 ## Технологии и зависимости
 
 Python ≥ 3.10. Зависимости зафиксированы в `requirements.txt`.
-Сборка — setuptools, команды запуска — `yandex-ads-mcp` и `yandex-ads-mcp-phase1`.
+Сборка — setuptools. Команды запуска — `yandex-ads-mcp`, `yandex-ads-mcp-phase1` и `yandex-ads-mcp-phase1-demo`.
 CI — GitHub Actions: `test.yml` (push/PR в `master`), `markdownlint.yml`.
 
 ## Нефункциональные требования и ограничения
@@ -55,4 +67,4 @@ CI — GitHub Actions: `test.yml` (push/PR в `master`), `markdownlint.yml`.
 
 ## Roadmap
 
-См. `agent_docs/backlog.md`.
+[Дорожная карта AI Performance Manager](guides/ai-performance-manager-roadmap.md) · [Бэклог репозитория](backlog.md)
