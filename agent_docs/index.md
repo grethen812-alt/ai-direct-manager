@@ -13,6 +13,7 @@
 - [Целевая архитектура AI Performance Manager](architecture/ai-performance-manager.md) — согласованная схема модулей, данных и прав.
 - [Дорожная карта AI Performance Manager](guides/ai-performance-manager-roadmap.md) — план фаз, риски и открытые вопросы.
 - [Контракт первого аудита](specs/2026-11-28-auditor-data-contract.md) — источники, поля, доступность и вопросы владельцу данных.
+- [Офлайн-конверсии Метрики](specs/2026-11-28-auditor-offline-attribution.md) — возможности API, ключи и надёжность обогащения CRM.
 - [Синтетический сценарий Auditor](guides/auditor-control-scenario.md) — входные таблицы, ожидаемые результаты и приёмка.
 - `agent_docs/invariants.md` — жёсткие правила продукта (нарушение = баг); сверяться при изменениях данных, безопасности, API.
 - `agent_docs/adr/` — атомарный журнал значимых решений (по файлу на решение). Правила: `agent_docs/adr/README.md`.
