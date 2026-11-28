@@ -73,10 +73,6 @@ _fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 _sh = logging.StreamHandler(sys.stderr)
 _sh.setFormatter(_fmt)
 logger.addHandler(_sh)
-if LOG_FILE:
-    _fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
-    _fh.setFormatter(_fmt)
-    logger.addHandler(_fh)
 
 
 def _log_body(prefix, *args):
@@ -1306,7 +1302,7 @@ async def _dispatch(name: str, arguments: dict):
             return [TextContent(type="text", text=f"Error: {e}")]
 
 
-async def _handle_campaigns_get(client, args):
+async def _handle_campaigns_get(client, args, *, api=None):
     criteria = {}
     if ids := args.get("ids"):
         criteria["Ids"] = ids
@@ -1318,7 +1314,7 @@ async def _handle_campaigns_get(client, args):
         "SelectionCriteria": criteria,
         "FieldNames": ["Id", "Name", "Status", "State", "Type", "StartDate", "DailyBudget", "Statistics"],
     }
-    data = await _api(client, "campaigns", "get", params)
+    data = await (api or _api)(client, "campaigns", "get", params)
     return _result(data.get("result", data))
 
 
@@ -1482,7 +1478,7 @@ async def _handle_adgroups_add(client, args):
     return _result(data.get("result", data))
 
 
-async def _handle_adgroups_get(client, args):
+async def _handle_adgroups_get(client, args, *, api=None):
     criteria = {}
     if ids := args.get("campaign_ids"):
         criteria["CampaignIds"] = ids
@@ -1492,7 +1488,7 @@ async def _handle_adgroups_get(client, args):
         "SelectionCriteria": criteria,
         "FieldNames": ["Id", "Name", "CampaignId", "Status", "RegionIds", "NegativeKeywords"],
     }
-    data = await _api(client, "adgroups", "get", params)
+    data = await (api or _api)(client, "adgroups", "get", params)
     return _result(data.get("result", data))
 
 
@@ -1571,7 +1567,7 @@ async def _handle_ads_update(client, args):
     return _result(data.get("result", data))
 
 
-async def _handle_ads_get(client, args):
+async def _handle_ads_get(client, args, *, api=None):
     criteria = {}
     if ids := args.get("campaign_ids"):
         criteria["CampaignIds"] = ids
@@ -1585,7 +1581,7 @@ async def _handle_ads_get(client, args):
         "TextAdFieldNames": ["Title", "Title2", "Text", "Href", "Mobile"],
         "ResponsiveAdFieldNames": ["Titles", "Texts", "Href", "BusinessId", "SitelinkSetId"],
     }
-    data = await _api501(client, "ads", "get", params)
+    data = await (api or _api501)(client, "ads", "get", params)
     return _result(data.get("result", data))
 
 
@@ -1645,7 +1641,7 @@ async def _handle_keywords_update(client, args):
     return _result(data.get("result", data))
 
 
-async def _handle_keywords_get(client, args):
+async def _handle_keywords_get(client, args, *, api=None):
     criteria = {}
     if ids := args.get("campaign_ids"):
         criteria["CampaignIds"] = ids
@@ -1663,7 +1659,7 @@ async def _handle_keywords_get(client, args):
             "WithoutBrands", "WithAdvertiserBrand", "WithCompetitorsBrand"
         ],
     }
-    data = await _api(client, "keywords", "get", params)
+    data = await (api or _api)(client, "keywords", "get", params)
     return _result(data.get("result", data))
 
 
@@ -1691,9 +1687,7 @@ async def _handle_bids_set(client, args):
     return _result(data.get("result", data))
 
 
-async def _handle_report(client, args):
-    """Reports use a different endpoint and flow."""
-    url = f"{_base_url()}/reports"
+def _report_body(args):
     body = {
         "params": {
             "SelectionCriteria": {
@@ -1713,7 +1707,13 @@ async def _handle_report(client, args):
         body["params"]["SelectionCriteria"]["Filter"] = [
             {"Field": "CampaignId", "Operator": "IN", "Values": [str(i) for i in campaign_ids]}
         ]
+    return body
 
+
+async def _handle_report(client, args):
+    """Reports use a different endpoint and flow."""
+    url = f"{_base_url()}/reports"
+    body = _report_body(args)
     headers = _headers()
     headers["processingMode"] = "auto"
     headers["returnMoneyInMicros"] = "false"
@@ -2278,6 +2278,10 @@ _extra_config = {
 
 
 async def main():
+    if LOG_FILE:
+        file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+        file_handler.setFormatter(_fmt)
+        logger.addHandler(file_handler)
     if not TOKEN:
         logger.error("YD_OAUTH_TOKEN environment variable is required")
         sys.exit(1)
