@@ -1,7 +1,7 @@
 # Архитектура
 
-Этот файл описывает реализованный базис. Предложение по развитию вынесено
-в [целевую архитектуру AI Performance Manager](architecture/ai-performance-manager.md).
+Этот файл описывает реализованный базис. Согласованное направление развития описано
+в [целевой архитектуре AI Performance Manager](architecture/ai-performance-manager.md).
 
 ## Обзор
 
